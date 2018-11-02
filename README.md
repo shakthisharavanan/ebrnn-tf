@@ -1,0 +1,1 @@
+Tensorlow implementation of "Sarah Adel Bargal*, Andrea Zunino*, Donghyun Kim, Jianming Zhang, Vittorio Murino, Stan Sclaroff. "Excitation Backprop for RNNs." CVPR, 2018."
