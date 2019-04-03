@@ -45,7 +45,6 @@ class feature_extractor(object):
 		self.extracted_features_dir = "/mnt/workspace/ebrnn-tf/fc7_features/"
 
 		self.labels = [x.replace(self.label_dir,"") for x in sorted(glob.glob(self.label_dir+"*"))]
-		self.labels = self.labels[6:]
 
 		self.image_size = image_size
 		self.batch_size = batch_size
@@ -127,7 +126,7 @@ if __name__ == "__main__":
 	batch_size = 16
 	# image_mean = [103.939, 116.779, 123.68]
 	image_mean = [123.68, 116.779, 103.939]  
-	sampling_rate = 3
+	sampling_rate = 30 # hz
 
 	extractor = feature_extractor(image_size, batch_size, image_mean)
 	with tqdm(total = len(extractor.labels)) as outer_pbar:
