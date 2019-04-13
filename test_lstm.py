@@ -1,4 +1,8 @@
 """
+Load and test LSTM Model
+"""
+
+"""
 Train LSTM with vgg16 features
 
 Author: Shakthi Duraimurugan
@@ -84,7 +88,7 @@ if __name__ == '__main__':
 		videos = sorted(glob.glob(extracted_features_dir+labels[i]+"/*"))
 		all_videos += videos
 		all_labels += ([i] * len(videos)) # set labels as indices
-	pdb.set_trace()
+	# pdb.set_trace()
 
 	# Create test train split
 	all_videos, all_labels = shuffle(all_videos, all_labels)
@@ -127,43 +131,38 @@ if __name__ == '__main__':
 
 	# Training procedure
 	with tf.Session() as sess:
-		sess.run(tf.global_variables_initializer())
-		print("Training")
-		with tqdm(total = epochs) as outer_pbar:
-			outer_pbar.set_description("Epochs")
-			for i in range(epochs):
-				previous_test_accuracy = 0
-				train_videos, train_labels = shuffle(train_videos, train_labels)
-				with tqdm(total = n_train) as inner_pbar:
-					inner_pbar.set_description("Batch")
-					for start, end in zip(range(0, n_train, batch_size), range(batch_size, n_train + batch_size, batch_size)):
-						# Read features for each mini batch and train lstm
-						batch_x = train_videos[start:end]
-						batch_y = train_labels[start:end]
-						features_x = read_video(batch_x, batch_y, n_frames)
-						seq_len = np.zeros(batch_size, np.int32)
-						seq_len[:] = n_frames
-						sess.run(training_operation, feed_dict = {x: features_x, y: batch_y, sequence_length: n_frames})
-						inner_pbar.update(batch_size)
+		saver.restore(sess, tf.train.latest_checkpoint('./saved_models/'))
+		# sess.run(tf.global_variables_initializer())
 
-					# Check test accuracy
-					total_accuracy = 0
-					for start, end in zip(range(0, n_test, batch_size), range(batch_size, n_test + batch_size, batch_size)):
-						batch_x = test_videos[start:end]
-						batch_y = test_labels[start:end]
-						features_x = read_video(batch_x, batch_y, n_frames)
-						accuracy = sess.run(accuracy_operation, feed_dict={x: features_x, y: batch_y, sequence_length: n_frames})
-						total_accuracy += (accuracy * len(batch_x))
-					current_test_accuracy = total_accuracy / n_test
-					print("Test accuracy = {:.3f}".format(current_test_accuracy))
+		# Load a video to test
+		batch_x = test_videos[0:1]
+		batch_y = test_labels[0:1]
+		print(batch_y)
+		features_x = read_video(batch_x, batch_y, n_frames)
+		pred = sess.run(logits, feed_dict = {x: features_x, y: batch_y, sequence_length: n_frames})
+		pdb.set_trace()
+		index = np.argmax(pred)
+		print("Prediction: {0}".format(labels[index[i]]))
 
-					# Save the current and the best model
-					saver.save(sess, './saved_models/latest_model')
-					if(current_test_accuracy>=previous_test_accuracy):
-						saver.save(sess, './saved_models/best_model')
-					previous_test_accuracy = current_test_accuracy
+		weights = tf.trainable_variables()
+		weights_val = sess.run(weights)
 
-				outer_pbar.update(1)
+		# Get lstm weights
+		wi, wc, wf, wo = np.split(lstm_weights_val, 4, axis = 1)
+
+		wxi = wi[:4096, :]
+		whi = wi[4096:, :]
+
+		wxC = wC[:4096, :]
+		whC = wC[4096:, :]
+
+		wxf = wf[:4096, :]
+		whf = wf[4096:, :]
+
+		wxo = wo[:4096, :]
+		who = wo[4096:, :]
+
+
 
 
 
