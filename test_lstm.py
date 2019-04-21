@@ -35,6 +35,12 @@ os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 
+slim_dir = "/mnt/workspace/models/research/slim/"
+checkpoints_dir = "/mnt/workspace/models/checkpoints/"
+sys.path.insert(0, slim_dir)
+from nets import vgg
+from preprocessing import vgg_preprocessing
+
 
 def read_video(x, y, sequence_length):
 	"""
@@ -104,7 +110,7 @@ if __name__ == '__main__':
 	# labels = sorted(set(all_labels)) # ['Basketball', 'BasketballDunk', 'Biking', 'CliffDiving', 'CricketBowling', 'Diving', 'Fencing', 'FloorGymnastics', 'GolfSwing', 'HorseRiding', 'IceDancing', 'LongJump', 'PoleVault', 'RopeClimbing', 'SalsaSpin', 'SkateBoarding', 'Skiing', 'Skijet', 'SoccerJuggling', 'Surfing', 'TennisSwing', 'TrampolineJumping', 'VolleyballSpiking', 'WalkingWithDog']
 
 	# Define placeholders
-	x = tf.placeholder(tf.float32, (None, n_frames, 4096))
+	x = tf.placeholder(tf.float32, (1, n_frames, 4096))
 	y = tf.placeholder(tf.uint8, (None))
 	y_one_hot = tf.one_hot(y, len(labels))
 	sequence_length = tf.placeholder(tf.int32, shape=None)
@@ -142,25 +148,129 @@ if __name__ == '__main__':
 		pred = sess.run(logits, feed_dict = {x: features_x, y: batch_y, sequence_length: n_frames})
 		pdb.set_trace()
 		index = np.argmax(pred)
-		print("Prediction: {0}".format(labels[index[i]]))
+		print("Prediction: {0}".format(labels[index]))
 
-		weights = tf.trainable_variables()
-		weights_val = sess.run(weights)
+		# Find dy/dx
+		dy_dx = sess.run(tf.gradients(logits[:, index], x), feed_dict = {x: features_x, y: batch_y, sequence_length: n_frames}) #shape (1, 30, 4096)
 
-		# Get lstm weights
-		wi, wc, wf, wo = np.split(lstm_weights_val, 4, axis = 1)
+		#Normalize for each 4096 neurons
+		layer_norm = dy_dx[0]/(dy_dx[0].sum(axis = 1)[:, None])
 
-		wxi = wi[:4096, :]
-		whi = wi[4096:, :]
+		# # Do Excitation backprop
 
-		wxC = wC[:4096, :]
-		whC = wC[4096:, :]
+		# weights = tf.trainable_variables()
+		# weights_val = sess.run(weights)
 
-		wxf = wf[:4096, :]
-		whf = wf[4096:, :]
+		# # Get lstm weights
+		# wi, wc, wf, wo = np.split(lstm_weights_val, 4, axis = 1)
 
-		wxo = wo[:4096, :]
-		who = wo[4096:, :]
+		# wxi = wi[:4096, :]
+		# whi = wi[4096:, :]
+
+		# wxC = wC[:4096, :]
+		# whC = wC[4096:, :]
+
+		# wxf = wf[:4096, :]
+		# whf = wf[4096:, :]
+
+		# wxo = wo[:4096, :]
+		# who = wo[4096:, :]
+
+	# # Do Excitation backprop
+	# image_size = vgg.vgg_16.default_image_size
+
+	# with tf.Graph().as_default():
+	# 	# x = tf.placeholder(dtype = tf.float32, shape = (image_size, image_size, 3))
+	# 	# normalized_image = vgg_preprocessing.preprocess_image(x, image_size, image_size, is_training=False)
+	# 	# normalized_images = tf.expand_dims(normalized_image, 0)
+	# 	# with slim.arg_scope(vgg.vgg_arg_scope()):
+	# 	# 	output, endpoints = vgg.vgg_16(normalized_images, num_classes = 1000, is_training = False)
+	# 	# 	probabilities = tf.nn.softmax(output)
+	# 	init_fn = slim.assign_from_checkpoint_fn(os.path.join(checkpoints_dir, 'vgg_16.ckpt'), slim.get_model_variables('vgg_16'))
+	# 	# Run in a session
+	# 	with tf.Session() as sess:
+	# 		init_fn(sess)
+	# 		probability, layers = sess.run([probabilities, endpoints], feed_dict = {x: image})
+	# 		layer_names, layer_activations = zip(*list(layers.items()))
+	# 		# pdb.set_trace()
+	# 		probability = probability[0, 0:]
+	# 		sorted_inds = [i[0] for i in sorted(enumerate(-probability), key=lambda x:x[1])]
+
+	# 		# pdb.set_trace()
+
+	# 		for i in range(10):
+	# 			index = sorted_inds[i]
+	# 			print('Probability %0.2f%% => [%s]' % (probability[index] * 100, labels[index]))
+	# 		# plt.imshow(image)
+	# 		# plt.annotate('{0}: {1: 0.2f}%'.format(labels[sorted_inds[0]], probability[sorted_inds[0]]*100), xy = (0.02, 0.95), xycoords = 'axes fraction')
+	# 		# plt.show()
+
+	# 		weights = tf.trainable_variables()
+	# 		weights_val = sess.run(weights)
+
+	# 		# Set MWP as a dict
+	# 		P = {}
+
+	# 		# Set one hot vector for the winning class
+	# 		p = np.zeros((1000,1))
+	# 		p[sorted_inds[0], 0] = 1
+	# 		P['fc8'] = np.copy(p) # 1000 X 1
+
+
+	# 		""" For fc7 MWP """
+	# 		# Get fc8 weights
+	# 		fc8_weights = np.copy((weights_val[-2])[0,0]) # 4096 X 1000
+
+	# 		# Get fc7 activations
+	# 		fc7_activations = np.copy((layer_activations[-2])[0,0]).T # 4096 X 1
+
+	# 		# Calculate MWP of fc7 using Eq 10 in paper
+	# 		fc8_weights = fc8_weights.clip(min = 0) # threshold weights at 0
+	# 		m = np.dot(fc8_weights.T, fc7_activations) # 1000 x 1
+	# 		n = P['fc8'] / m # 1000 x 1
+	# 		o = np.dot(fc8_weights, n) # 4096 x 1
+	# 		P['fc7'] = fc7_activations * o # 4096 x 1
+
+
+
+	# 		""" For fc6 MWP """
+	# 		# Get fc7 weights
+	# 		fc7_weights = np.copy((weights_val[-4])[0,0]) # 4096 X 4096
+
+	# 		# Get fc6 activations
+	# 		fc6_activations = np.copy((layer_activations[-3])[0,0]).T # 4096 X 1
+
+	# 		# Calculate MWP of fc6 using Eq 10 in paper
+	# 		fc7_weights = fc7_weights.clip(min = 0) # threshold weights at 0
+	# 		m = np.dot(fc7_weights.T, fc6_activations) # 4096 x 1
+	# 		n = P['fc7'] / m # 4096 x 1
+	# 		o = np.dot(fc7_weights, n) # 4096 x 1
+	# 		P['fc6'] = fc6_activations * o # 4096 * 1
+
+
+
+	# 		""" For pool5 MWP """
+	# 		# Get fc6 weights
+	# 		fc6_weights = np.copy(weights_val[-6]) # (7, 7, 512, 4096)
+	# 		fc6_weights_reshaped = fc6_weights.reshape(-1, 4096) # (25088, 4096)
+
+	# 		# Get pool5 activations
+	# 		pool5_activations = np.copy(layer_activations[-4]).reshape(-1, 1) # (25088, 1)
+
+	# 		# Calculate MWP of pool5 using Eq 10 in paper
+	# 		fc6_weights_reshaped = fc6_weights_reshaped.clip(min = 0) # threshold weights at 0
+	# 		m = np.dot(fc6_weights_reshaped.T, pool5_activations) # 4096 x 1
+	# 		n = P['fc6'] / m # 4096 x 1
+	# 		o = np.dot(fc6_weights_reshaped, n) # 25088 x 1
+	# 		P['pool5'] = pool5_activations * o # 25088 x 1
+	# 		P['pool5'] = P['pool5'].reshape(7, 7, 512)
+
+	# 		heatmap = np.sum(P['pool5'], axis = 2)
+	# 		heatmap_resized = transform.resize(heatmap, (image_size, image_size), order = 3, mode = 'constant')
+	# 		plt.imshow(image)
+	# 		plt.imshow(heatmap_resized, cmap = 'jet', alpha = 0.7)
+	# 		plt.show()
+
 
 
 
