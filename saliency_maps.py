@@ -16,7 +16,7 @@ import tensorflow as tf
 import numpy as np
 import matplotlib.pyplot as plt
 import pylab as plt
-
+from skimage import transform, filters
 from tqdm import tqdm, trange, tqdm_notebook, tnrange
 import glob
 import time
@@ -57,10 +57,13 @@ class cnn_lstm(object):
 			
 			self.final_conv = end_points['vgg_16/conv5/conv5_3']
 			self.fc7 = end_points['vgg_16/fc7']
+			self.fc6 = end_points['vgg_16/fc6']
+			self.pool5 = end_points['vgg_16/pool5']
 			self.probablities = tf.nn.softmax(outputs)
 
 			self.init_fn = slim.assign_from_checkpoint_fn(os.path.join(checkpoints_dir, 'vgg_16.ckpt'),slim.get_model_variables('vgg_16'))
 			self.cnn_sess = tf.Session()
+			self.cnn_weights = tf.trainable_variables()
 
 		# Define LSTM Network
 		g2 = tf.Graph()
@@ -102,12 +105,25 @@ def trim_video(video_frames, sequence_length = 30):
 	trimmed_video_frames = (video_frames[::offset])[:sequence_length]
 	return trimmed_video_frames
 
+def generate_video(img):
+    for i in range(img.shape[-1]):
+        # plt.imshow(img[i], cmap=cm.Greys_r)
+        plt.savefig(folder + "/file%02d.png" % i)
+
+    os.chdir("your_folder")
+    subprocess.call([
+        'ffmpeg', '-framerate', '8', '-i', 'file%02d.png', '-r', '30', '-pix_fmt', 'yuv420p',
+        'video_name.mp4'
+    ])
+    for file_name in glob.glob("*.png"):
+        os.remove(file_name)
 
 if __name__ == "__main__":
 
 	# Set Paths
 	checkpoints_dir = "/mnt/workspace/models/checkpoints/"
-	video_path = "./v_GolfSwing_g01_c01.avi"
+	# video_path = "./v_GolfSwing_g01_c01.avi"
+	video_path = "./v_HorseRiding_g01_c02.avi"
 	label_dir = "/mnt/workspace/datasets/ucf101/ucf24/labels/"
 	labels = [x.replace(label_dir,"") for x in sorted(glob.glob(label_dir+"*"))] # ['Basketball', 'BasketballDunk', 'Biking', 'CliffDiving', 'CricketBowling', 'Diving', 'Fencing', 'FloorGymnastics', 'GolfSwing', 'HorseRiding', 'IceDancing', 'LongJump', 'PoleVault', 'RopeClimbing', 'SalsaSpin', 'SkateBoarding', 'Skiing', 'Skijet', 'SoccerJuggling', 'Surfing', 'TennisSwing', 'TrampolineJumping', 'VolleyballSpiking', 'WalkingWithDog']
 
@@ -129,13 +145,19 @@ if __name__ == "__main__":
 
 	# Load vgg16 weights and extract features
 	video_features = []
+	fc6_activations = []
+	pool5_activations = []
 	slim = tf.contrib.slim
 	model.init_fn(model.cnn_sess)
 	for start, end in zip(range(0, n_frames, batch_size), range(batch_size, n_frames + batch_size, batch_size)):
-		fc7 = model.cnn_sess.run(model.fc7, feed_dict = {model.input_batch: trimmed_video_frames[start:end]})
+		fc7, fc6, pool5 = model.cnn_sess.run([model.fc7, model.fc6, model.pool5], feed_dict = {model.input_batch: trimmed_video_frames[start:end]})
 		video_features = video_features + list(fc7)
+		fc6_activations = fc6_activations + list(fc6)
+		pool5_activations = pool5_activations + list(pool5)
 	video_features = np.array(video_features)[:,0,0,:] # from (30, 1, 1, 4096) to (30, 4096)
 	video_features = np.expand_dims(video_features, axis = 0) # (1, 30, 4096)
+	fc6_activations = np.array(fc6_activations)[:,0,0,:] # (30, 4096)
+	pool5_activations = np.array(pool5_activations) # (30, 7, 7, 512)
 
 	# Load lstm model weights and get predictions
 	model.lstm_saver.restore(model.lstm_sess, tf.train.latest_checkpoint('./saved_models/'))
@@ -145,8 +167,58 @@ if __name__ == "__main__":
 
 
 	""" Now perform EBRNN steps """
+	# Set MWP as a dict
+	P = {}
+
 	# Get gradient of LSTM Layer
-	dy_dx = model.lstm_sess.run(tf.gradients(model.out[:, index], model.x), feed_dict = {model.x: video_features, model.sequence_length: n_frames}) #shape (1, 30, 4096)
+	dy_dx = model.lstm_sess.run(tf.gradients(model.out[:, index], model.x), feed_dict = {model.x: video_features, model.sequence_length: n_frames}) #list of shape (1, 30, 4096)
+	dy_dx = dy_dx[0].clip(min = 0) # Clip to 0 (1, 30, 4096)
+
+	# Temporal and Layer wise normalization
+	norm = dy_dx[0]/(dy_dx.sum()) # makes norm.sum() = 1
+
+	# Follow Excitation Backprop steps here on
+	cnn_weights_val = model.cnn_sess.run(model.cnn_weights) # Get weights of the model
+
+
+	# Set fc7 MWP
+	P['fc7'] = norm.T # (4096, 30)
+
+	""" For fc6 MWP """
+	# Get fc7 weights
+	fc7_weights = np.copy((cnn_weights_val[-4])[0,0]) # 4096 X 4096
+
+	# Get fc6 activations
+	fc6_activations = fc6_activations.T # 4096 X 30
+
+	# Calculate MWP of fc6 using Eq 10 in paper
+	fc7_weights = fc7_weights.clip(min = 0) # threshold weights at 0
+	m = np.dot(fc7_weights.T, fc6_activations) # 4096 x 30
+	n = P['fc7'] / m # 4096 x 30
+	o = np.dot(fc7_weights, n) # 4096 x 30
+	P['fc6'] = fc6_activations * o # 4096 * 30
+
+
+	""" For pool5 MWP """
+	# Get fc6 weights
+	fc6_weights = np.copy(cnn_weights_val[-6]) # (7, 7, 512, 4096)
+	fc6_weights_reshaped = fc6_weights.reshape(-1, 4096) # (25088, 4096)
+
+	# Get pool5 activations
+	pool5_activations = pool5_activations.reshape(30, -1).T # (25088, 30)
+
+	# Calculate MWP of pool5 using Eq 10 in paper
+	fc6_weights_reshaped = fc6_weights_reshaped.clip(min = 0) # threshold weights at 0
+	m = np.dot(fc6_weights_reshaped.T, pool5_activations) # 4096 x 30
+	n = P['fc6'] / m # 4096 x 30
+	o = np.dot(fc6_weights_reshaped, n) # 25088 x 30
+	P['pool5'] = pool5_activations * o # 25088 x 30
+	P['pool5'] = P['pool5'].reshape(7, 7, 512, 30)
+
+	pdb.set_trace()
+
+	heatmap = np.sum(P['pool5'], axis = 2) # (7, 7, 30)
+	heatmap_resized = transform.resize(heatmap, (image_size, image_size), order = 3, mode = 'constant') # (224, 224, 30)
 
 
 	pass
