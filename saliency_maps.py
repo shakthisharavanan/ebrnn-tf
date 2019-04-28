@@ -28,6 +28,11 @@ sys.path.insert(0, slim_dir)
 from nets import vgg
 from preprocessing import vgg_preprocessing
 
+from im2col import *
+from eb_fc import *
+from eb_pool import *
+from eb_conv import *
+
 os.environ["CUDA_DEVICE_ORDER"]="PCI_BUS_ID"
 os.environ["CUDA_VISIBLE_DEVICES"] = '0'
 os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
@@ -122,8 +127,9 @@ if __name__ == "__main__":
 
 	# Set Paths
 	checkpoints_dir = "/mnt/workspace/models/checkpoints/"
-	# video_path = "./v_GolfSwing_g01_c01.avi"
-	video_path = "./v_HorseRiding_g01_c02.avi"
+	video_path = "./v_GolfSwing_g01_c01.avi"
+	# video_path = "./v_HorseRiding_g01_c02.avi"
+	# video_path = "./v_CliffDiving_g05_c02.avi"
 	label_dir = "/mnt/workspace/datasets/ucf101/ucf24/labels/"
 	labels = [x.replace(label_dir,"") for x in sorted(glob.glob(label_dir+"*"))] # ['Basketball', 'BasketballDunk', 'Biking', 'CliffDiving', 'CricketBowling', 'Diving', 'Fencing', 'FloorGymnastics', 'GolfSwing', 'HorseRiding', 'IceDancing', 'LongJump', 'PoleVault', 'RopeClimbing', 'SalsaSpin', 'SkateBoarding', 'Skiing', 'Skijet', 'SoccerJuggling', 'Surfing', 'TennisSwing', 'TrampolineJumping', 'VolleyballSpiking', 'WalkingWithDog']
 
@@ -215,14 +221,15 @@ if __name__ == "__main__":
 	P['pool5'] = pool5_activations * o # 25088 x 30
 	P['pool5'] = P['pool5'].reshape(7, 7, 512, 30)
 
-	pdb.set_trace()
+	# pdb.set_trace()
 
 	heatmap = np.sum(P['pool5'], axis = 2) # (7, 7, 30)
-	heatmap_resized = transform.resize(heatmap, (image_size, image_size), order = 3, mode = 'constant') # (224, 224, 30)
-
-
+	heatmap_resized = transform.resize(heatmap, (240, 320), order = 3, mode = 'constant') # (240, 320, 30)
+	for i in range(30):
+		plt.imshow(trimmed_video_frames[i])
+		plt.imshow(heatmap_resized[:, :, i], cmap = 'jet', alpha = 0.7)
+		ymax,xmax = np.unravel_index(heatmap_resized[:, :, i].argmax(), heatmap_resized[:, :, i].shape)
+		plt.plot(xmax, ymax, "*", color = 'green')
+		plt.savefig('test' + str(i) + '.png')
+		plt.clf()
 	pass
-
-
-
-
