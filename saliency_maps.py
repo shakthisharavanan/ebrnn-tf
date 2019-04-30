@@ -127,9 +127,9 @@ if __name__ == "__main__":
 
 	# Set Paths
 	checkpoints_dir = "/mnt/workspace/models/checkpoints/"
-	video_path = "./v_GolfSwing_g01_c01.avi"
-	# video_path = "./v_HorseRiding_g01_c02.avi"
-	# video_path = "./v_CliffDiving_g05_c02.avi"
+	# video_path = "./v_GolfSwing_g01_c01.avi"
+	video_path = "./v_HorseRiding_g01_c02.avi"
+	# video_path = "./v_SkateBoarding_g04_c01.avi"
 	label_dir = "/mnt/workspace/datasets/ucf101/ucf24/labels/"
 	labels = [x.replace(label_dir,"") for x in sorted(glob.glob(label_dir+"*"))] # ['Basketball', 'BasketballDunk', 'Biking', 'CliffDiving', 'CricketBowling', 'Diving', 'Fencing', 'FloorGymnastics', 'GolfSwing', 'HorseRiding', 'IceDancing', 'LongJump', 'PoleVault', 'RopeClimbing', 'SalsaSpin', 'SkateBoarding', 'Skiing', 'Skijet', 'SoccerJuggling', 'Surfing', 'TennisSwing', 'TrampolineJumping', 'VolleyballSpiking', 'WalkingWithDog']
 
@@ -224,12 +224,14 @@ if __name__ == "__main__":
 	# pdb.set_trace()
 
 	heatmap = np.sum(P['pool5'], axis = 2) # (7, 7, 30)
-	heatmap_resized = transform.resize(heatmap, (240, 320), order = 3, mode = 'constant') # (240, 320, 30)
+	heatmap_resized = transform.resize(heatmap, (240, 320), order = 3, mode = 'constant').clip(min = 0) # (240, 320, 30)
 	for i in range(30):
 		plt.imshow(trimmed_video_frames[i])
 		plt.imshow(heatmap_resized[:, :, i], cmap = 'jet', alpha = 0.7)
+		plt.axis('off')
 		ymax,xmax = np.unravel_index(heatmap_resized[:, :, i].argmax(), heatmap_resized[:, :, i].shape)
-		plt.plot(xmax, ymax, "*", color = 'green')
-		plt.savefig('test' + str(i) + '.png')
+		# plt.plot(xmax, ymax, "*", color = 'green')
+		plt.savefig('test_output/heatmap' + str(i) + '.png', bbox_inches='tight', pad_inches=0)
+		plt.imsave('test_output/image' + str(i) + '.png', trimmed_video_frames[i])
 		plt.clf()
 	pass
